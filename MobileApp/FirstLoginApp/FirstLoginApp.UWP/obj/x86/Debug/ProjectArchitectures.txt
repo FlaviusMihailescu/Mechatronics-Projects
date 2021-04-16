@@ -1,0 +1,1 @@
+P:\XamarinProject\FirstLoginApp\FirstLoginApp\FirstLoginApp.UWP\FirstLoginApp.UWP.csproj;x86

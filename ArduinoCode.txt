@@ -1,0 +1,340 @@
+#include <Keypad.h>
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 16, 2); //initializare LCD
+
+#define pass_lenght 6 //dimensiunea parolei(ultimul caracter este null) 
+#define nr_ap 4 //numarul total al apartamentelor
+#define timp_raspuns 2250 // echivalentul a 9 secunde
+int PWM = 60;
+char password[pass_lenght]; //sirul ce va fi format de la tastatura
+char* pass_ap[nr_ap] = { "12345", "54321", "13579", "02468"}; //parolele pentru apartamente
+int contor_pass; // folosit pentru numararea apasarii tastelor
+int apelari_totale;
+int apelari_gresite;
+int apelari_incomplete;
+int apelari_corecte[4];
+int raspunsuri[4];
+int fara_raspuns[4];
+
+
+void setup() {
+  DDRH = 0x60; //butoane oprire deschidere & inchidere
+  DDRB |= 0x70; //punte H
+  DDRJ &= ~0X02; //PIR
+  DDRC |= 0x0F; //LED apartament 1
+  DDRC |= 0xF0; //Buton apartament 1
+
+  init_timer1();
+  init_PWM_timer2();
+  Serial.begin(9600);
+
+  //lcd.begin();
+  lcd.begin();
+  lcd.setCursor(3, 0);
+  lcd.print("Buna Ziua!");
+  lcd.setCursor(4, 1);
+  lcd.print("Parola:");
+}
+
+const byte ROWS = 4;
+const byte COLS = 3;
+
+char hexaKeys[ROWS][COLS] = {
+  {'1', '2', '3'},
+  {'4', '5', '6'},
+  {'7', '8', '9'},
+  {'*', '0', '#'}
+};
+
+byte rowPins[ROWS] = {22, 23, 24, 25};//connect to the row pinouts of the keypad
+byte colPins[COLS] = {26, 27, 28};//connect to the column pinouts of the keypad
+
+Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);//initialize an instance of class NewKeypad
+
+
+void init_timer1()
+{
+  cli();
+  TCCR1A = 0;
+  TCCR1B = 0;
+  TCCR1B = (1 << CS10);
+  sei();
+}
+
+void init_PWM_timer2()
+{
+  cli();
+  TCCR2A = 0;
+  TCCR2B = 0;
+  TCCR2A = _BV(COM2A0) | _BV(COM2B1) | _BV(WGM20);
+  TCCR2B = _BV(WGM22) | _BV(CS22);
+  sei();
+}
+
+void Asteptare() { // timpul cat usa v-a sta deschisa
+  int over = 0;
+  TCNT1 = 0;
+
+  while (over <= 2250) {
+    if (TCNT1 >= 64000) {
+      TCNT1 = 0;
+      over++;
+    }
+  }
+}
+int Asteptare_Raspuns(bool stare_btn, int contor_ap) { // timpul in care se poate primi rspuns de la apartament
+  int over = 0;
+  TCNT1 = 0;
+  Serial.print("b=");
+  Serial.println(stare_btn);
+  while ((over <= timp_raspuns) and stare_btn == 0) {
+    if (TCNT1 >= 64000) {
+      TCNT1 = 0;
+      over++;
+    }
+    stare_btn = PINC & 0x10;
+    if (contor_ap + 1 == 1)
+      stare_btn = PINC & 0x10;
+    if (contor_ap + 1 == 2)
+      stare_btn = PINC & 0x20;
+    if (contor_ap + 1 == 3)
+      stare_btn = PINC & 0x40;
+    if (contor_ap + 1 == 4)
+      stare_btn = PINC & 0x80;
+  }
+  return over;
+}
+int i = 0;
+void Deschidere(int PWM) {
+  PORTB = 0X00;
+  PORTH = 0X00;
+  while (!(PINH & 0x40)) {
+    OCR2A = PWM;
+    PORTB |= 0X40;
+  }
+  PORTB = 0X00;
+  PORTH = 0X00;
+}
+void Inchidere(int PWM) {
+  while (!(PINH & 0x20)) {
+    if (PINJ & 0X02) {
+      PORTH |= 0X10;
+      Deschidere(PWM);
+      Asteptare();
+      Inchidere(PWM);
+    }
+    else {
+      OCR2A = PWM;
+      PORTB |= 0X20;
+    }
+  }
+  PORTB = 0X00;
+  PORTH = 0X00;
+}
+void Actionare_Deschidere() {
+  lcd.clear();
+  lcd.setCursor(4, 0);
+  lcd.print("Deschis");
+  lcd.setCursor(2, 1);
+  lcd.print("Puteti intra");
+  Deschidere(PWM);
+  Asteptare();
+  Inchidere(PWM);
+}
+void Nu_Raspunde() {
+  lcd.clear();
+  lcd.setCursor(2, 0);
+  lcd.print("Nu Raspunde");
+  lcd.setCursor(2, 1);
+  lcd.print("Reincercati");
+}
+
+int aux = 0; // folosit pentru a verificarea corectitudinii parolei
+int contor_ap;
+int ok = 0; // folosit pentru verificarea apasarii tastaturii
+
+void Rulare() { // timpul cat usa v-a sta deschisa
+  bool stare_btn;
+  int over = 0;
+  TCNT1 = 0;
+
+  while (over <= 2250) {
+    if (TCNT1 >= 64000) {
+      TCNT1 = 0;
+      over++;
+      char customKey = customKeypad.getKey();
+
+      if (customKey) {
+      ok=1;
+        
+        password[contor_pass] = customKey;
+
+        lcd.clear();
+        lcd.setCursor(1, 0);
+        lcd.print("Parola:");
+        lcd.setCursor(contor_pass, 1);
+        lcd.print(password[contor_pass]);
+
+        contor_pass++;
+
+        if (contor_pass == pass_lenght - 1) {
+          ok=0;
+          for (contor_ap = 0; contor_ap < nr_ap; contor_ap++) {
+            if (!(strcmp(password, pass_ap[contor_ap]))) {
+              aux = 1;
+              break;
+            }
+          }
+          if (aux == 0) {
+            Inchidere(PWM);
+            
+            lcd.clear();
+            lcd.setCursor(1, 0);
+            lcd.print("Parola gresita");
+            lcd.setCursor(2, 1);
+            lcd.print("Reincercati");
+            Serial.println("Parola gresita");
+
+            over = 0; //resetam contorul pentru ca timpul alocat tastarii sa se reseteze
+
+            apelari_gresite++;
+          }
+          else {
+            lcd.clear();
+            lcd.print("Parola corecta:");
+            lcd.println(contor_ap + 1);
+            lcd.setCursor(3, 1);
+            lcd.print("Asteptati");
+
+            Serial.print("Parola corecta pentru apartamentul: ");
+            Serial.println(contor_ap + 1);
+
+            apelari_corecte[contor_ap]++;
+
+            if (contor_ap + 1 == 1) {
+              stare_btn = PINC & 0x10;
+              PORTC |= 0x01;
+              if (Asteptare_Raspuns(stare_btn, contor_ap) < timp_raspuns) {
+                raspunsuri[contor_ap]++;
+                Actionare_Deschidere();
+                PORTC &= ~ 0x01;
+                break;
+              }
+              else {
+                fara_raspuns[contor_ap]++;
+                Nu_Raspunde();
+                PORTC &= ~ 0x01;
+                over = 0; //resetam contorul pentru ca timpul alocat tastarii sa se reseteze
+              }
+            }
+            if (contor_ap + 1 == 2) {
+              stare_btn = PINC & 0x20;
+              PORTC |= 0x02;
+
+              if (Asteptare_Raspuns(stare_btn, contor_ap) < timp_raspuns) {
+                raspunsuri[contor_ap]++;
+                Actionare_Deschidere();
+                PORTC &= ~ 0x02;
+                break;
+              }
+              else {
+                fara_raspuns[contor_ap]++;
+                Nu_Raspunde();
+                over = 0; //resetam contorul pentru ca timpul alocat tastarii sa se reseteze
+                PORTC &= ~ 0x02;
+              }
+            }
+            if (contor_ap + 1 == 3) {
+              stare_btn = PINC & 0x40;
+              PORTC |= 0x04;
+
+              if (Asteptare_Raspuns(stare_btn, contor_ap) < timp_raspuns) {
+                raspunsuri[contor_ap]++;
+                Actionare_Deschidere();
+                PORTC &= ~ 0x04;
+                break;
+              }
+              else {
+                fara_raspuns[contor_ap]++;
+                Nu_Raspunde();
+                over = 0; //resetam contorul pentru ca timpul alocat tastarii sa se reseteze
+                PORTC &= ~ 0x04;
+              }
+            }
+            if (contor_ap + 1 == 4) {
+              stare_btn = PINC & 0x80;
+              PORTC |= 0x08;
+
+              if (Asteptare_Raspuns(stare_btn, contor_ap) < timp_raspuns) {
+                raspunsuri[contor_ap]++;
+                Actionare_Deschidere();
+                PORTC &= ~ 0x08;
+                break;
+              }
+              else {
+                fara_raspuns[contor_ap]++;
+                Nu_Raspunde();
+                over = 0; //resetam contorul pentru ca timpul alocat tastarii sa se reseteze
+                PORTC &= ~ 0x08;
+              }
+            }
+          }
+          contor_pass = 0;
+          aux = 0;
+        }
+      }
+    }
+  }
+  
+  aux = 0;
+  contor_pass = 0;
+  //lcd.begin();
+  lcd.begin();
+  
+  lcd.setCursor(3, 0);
+  lcd.print("Buna Ziua!");
+  lcd.setCursor(4, 1);
+  lcd.print("Parola:");
+
+  //in cazul in care se doreste afisarea in Serial monitor a evidentei intrarilor
+  if(ok==1){
+    apelari_incomplete++;
+  }
+  ok=0;
+  /*
+  Serial.print("Apelari gresite: ");
+  Serial.println(apelari_gresite);
+  Serial.println("");
+
+  Serial.print("Apelari incomplete: ");
+  Serial.println(apelari_incomplete);
+  Serial.println("");
+
+  for(int j=0;j<nr_ap;j++){
+    Serial.print("Apelari corecte pentru apartamentul ");
+    Serial.print(j+1);
+    Serial.println(" : ");
+    Serial.println(apelari_corecte[j]);
+    Serial.println();
+    
+    Serial.print("Raspunsuri pentru apartamentul ");
+    Serial.print(j+1);
+    Serial.println(" : ");
+    Serial.println(raspunsuri[j]);
+    Serial.println();
+
+    Serial.print("Fara raspuns pentru apartamentul ");
+    Serial.print(j+1);
+    Serial.println(" : ");
+    Serial.println(fara_raspuns[j]);
+    Serial.println();
+  }
+  */
+  
+}
+
+void loop() {
+  Rulare();
+
+}
