@@ -18,3 +18,5 @@ Modul de funcționare a acestui proiect:
 Un utilizator vine la interfon, tastează parola de la un anumit apartament (afisaj în timp real pe LCD). 
 În funcție de răspunsul primit de la apartament (din buton sau din aplicația mobile), va primi un răspuns pe LCD, 
 iar ușa se va deschide sau nu. Apelul este salvat în istoricul aplicației mobile la secțiunea "History". 
+
+Demonstrație video proiect: https://www.youtube.com/watch?v=N3Szf0RnGhs&t=6s&ab_channel=FlaviusMihailescu
